@@ -5,12 +5,12 @@ from functools import partial
 
 import sys
 from PyQt5.QtWidgets import QApplication, QWidget, QLabel, QHBoxLayout, QVBoxLayout, QPushButton
-from PyQt5.QtWidgets import QSlider, QMainWindow
-from PyQt5.QtWidgets import QLineEdit
-from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import QSlider, QMainWindow, QShortcut
+from PyQt5.QtWidgets import QLineEdit, QRubberBand
+from PyQt5.QtCore import Qt, QRect, QSize
 from PyQt5.QtWidgets import QSizePolicy
 
-from PyQt5.QtGui import QIcon, QPixmap
+from PyQt5.QtGui import QIcon, QPixmap, QKeySequence
 
 from PIL import ImageQt, Image
 
@@ -51,11 +51,14 @@ class App(QMainWindow):
         self.setWindowIcon(self.icon)
         self.setGeometry(self.left, self.top, self.width, self.height)
 
+        self.msgSc = QShortcut(QKeySequence('Ctrl+M'), self)
+        self.msgSc.activated.connect(lambda : QMessageBox.information(self,
+            'Message', 'Ctrl + M initiated'))
 
         rootLayout = QVBoxLayout()
-        self.rootLine = QLineEdit('media')
+        self.rootLine = QLineEdit('media', self)
         self.rootLine.setPlaceholderText('images folder')
-        self.outfLine = QLineEdit('output')
+        self.outfLine = QLineEdit('output', self)
         self.outfLine.setPlaceholderText('output folder')
         self.rootBtn = QPushButton("Apply")
         self.resultLabel = QLabel("Num Files: 0")
@@ -71,11 +74,12 @@ class App(QMainWindow):
 
         control_layout = self.create_control_layout()
 
-        # # Create widget
-        self.label = QLabel(self)
+        ## Create widget
+        self.label =  QMainLabel()
+        self.label.load_pixmap('media/p1024.png')
 
-        self.pixmap = QPixmap('media/p1024.png')
-        self.label.setPixmap(self.pixmap)
+        self.shortcut = QShortcut(QKeySequence("Ctrl+Z"), self)
+        self.shortcut.activated.connect(self.test_method)
         
         layout = QHBoxLayout()
         layout.addWidget(self.label)
@@ -112,6 +116,7 @@ class App(QMainWindow):
         self.setCentralWidget(central_widget)
         self.show()
 
+
     def add_slider(self):
         slider = QSlider(Qt.Horizontal)
         slider.setMaximum(90)
@@ -130,14 +135,10 @@ class App(QMainWindow):
         self.rotate_label.setText(str(value))
         self.rotate_slider.setValue(value)
 
-        image = ImageQt.fromqpixmap(self.pixmap)
+        image = ImageQt.fromqpixmap(self.label.original_pixmap)
         image = image.rotate(-1 * value)
         pixmap = ImageQt.toqpixmap(image)
         self.label.setPixmap(pixmap)
-
-    
-    def next_image(self):
-        pass
 
 
     def apply_root_dir(self):
@@ -179,8 +180,7 @@ class App(QMainWindow):
         image = Image.open(path)
         image = pad_to_square(image)
         image = ImageQt.toqpixmap(image)
-        self.pixmap = QPixmap(image)
-        self.label.setPixmap(self.pixmap)
+        self.label.load_pixmap(image)
 
 
     def create_control_layout(self):
@@ -222,6 +222,42 @@ class App(QMainWindow):
         self.rotate_slider.valueChanged.emit(0)
         self.read_pad_show(self.images_list[self.idx])
         self.cur_pos_label.setText(f'Position: {self.idx + 1}')
+
+
+class QMainLabel(QLabel):
+    def __init__(self, text='', parentQWidget = None):
+        super(QMainLabel, self).__init__(text, parentQWidget)
+        self.original_pixmap = None
+    
+    def load_pixmap(self, path):
+        self.original_pixmap = QPixmap(path)
+        self.setPixmap(self.original_pixmap)
+
+    def restore_original(self):
+        print('CTRL+Z')
+        if self.original_pixmap:
+            self.setPixmap(self.original_pixmap)
+
+    def mousePressEvent (self, eventQMouseEvent):
+        self.originQPoint = eventQMouseEvent.pos()
+        self.currentQRubberBand = QRubberBand(QRubberBand.Rectangle, self)
+        self.currentQRubberBand.setGeometry(QRect(self.originQPoint, QSize()))
+        self.currentQRubberBand.show()
+
+    def mouseMoveEvent (self, eventQMouseEvent):
+        self.currentQRubberBand.setGeometry(QRect(self.originQPoint, eventQMouseEvent.pos()).normalized())
+
+    def mouseReleaseEvent (self, eventQMouseEvent):
+        self.currentQRubberBand.hide()
+        currentQRect = self.currentQRubberBand.geometry()
+        self.currentQRubberBand.deleteLater()
+        cropQPixmap = self.pixmap().copy(currentQRect)
+        # cropQPixmap.save('output.png')
+
+        crop_PIL = ImageQt.fromqpixmap(cropQPixmap)
+        crop_PIL = pad_to_square(crop_PIL, 1024)
+        cropQPixmap = ImageQt.toqpixmap(crop_PIL)
+        self.setPixmap(cropQPixmap)
         
 
 # https://jdhao.github.io/2017/11/06/resize-image-to-square-with-padding/
@@ -238,8 +274,6 @@ def pad_to_square(image, size=1024):
                         (size-new_size[1])//2))
 
     return new_im
-
-
 
 
 if __name__ == '__main__':
