@@ -4,18 +4,18 @@ import shutil
 from functools import partial
 
 import sys
-from PyQt5.QtWidgets import QApplication, QWidget, QLabel, QHBoxLayout, QVBoxLayout, QPushButton
+from PyQt5.QtWidgets import QApplication, QLayout, QWidget, QLabel, QHBoxLayout, QVBoxLayout, QPushButton
 from PyQt5.QtWidgets import QSlider, QMainWindow, QShortcut
-from PyQt5.QtWidgets import QLineEdit, QRubberBand
+from PyQt5.QtWidgets import QLineEdit, QRubberBand, QMessageBox
 from PyQt5.QtCore import Qt, QRect, QSize
 from PyQt5.QtWidgets import QSizePolicy
 
-from PyQt5.QtGui import QIcon, QPixmap, QKeySequence
+from PyQt5.QtGui import QIcon, QIntValidator, QPixmap, QKeySequence
 
 from PIL import ImageQt, Image
 
 
-class App(QMainWindow):
+class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
@@ -24,49 +24,64 @@ class App(QMainWindow):
         self.top = 10
         self.width = 640
         self.height = 480
+        
         self.icon = QIcon(QPixmap('v.png'))
-
         self.idx = None
+        self.main_label_size = 512
 
         self.initUI()
 
 
     def keyPressEvent(self, event):
+
+        super().keyPressEvent(event)
+
         if event.key() == Qt.Key_Left:
             curr_value = self.rotate_slider.value()
-            self.rotate_slider.valueChanged.emit(curr_value + 1)
+            self.rotate_slider.valueChanged.emit(curr_value - 5)
 
         if event.key() == Qt.Key_Right:
             curr_value = self.rotate_slider.value()
-            self.rotate_slider.valueChanged.emit(curr_value - 1)
+            self.rotate_slider.valueChanged.emit(curr_value + 5)
 
         if event.key() == Qt.Key_Space:
             self.test_method()
 
     def test_method(self):
             print('Space key pressed')
+
+    def test_message(self):
+            QMessageBox.information(self, 'Message', 'Ctrl + M initiated')
     
     def initUI(self):
         self.setWindowTitle(self.title)
         self.setWindowIcon(self.icon)
         self.setGeometry(self.left, self.top, self.width, self.height)
 
-        self.msgSc = QShortcut(QKeySequence('Ctrl+M'), self)
-        self.msgSc.activated.connect(lambda : QMessageBox.information(self,
-            'Message', 'Ctrl + M initiated'))
+        self.msgSc = QShortcut(QKeySequence("Ctrl+M"), self)
+        self.msgSc.activated.connect(self.test_message)
 
         rootLayout = QVBoxLayout()
-        self.rootLine = QLineEdit('media', self)
-        self.rootLine.setPlaceholderText('images folder')
-        self.outfLine = QLineEdit('output', self)
-        self.outfLine.setPlaceholderText('output folder')
+        # rootLayout.setAlignment(Qt.AlignTop)
+
+        self.imageDirLine = QLineEdit('test_images', self)
+        self.imageDirLine.setPlaceholderText('Images folder')
+        self.maskDirLine = QLineEdit('test_masks', self)
+        self.maskDirLine.setPlaceholderText('Raw masks folder (optional)')
+        self.outDirLine = QLineEdit('test_output', self)
+        self.outDirLine.setPlaceholderText('Output folder')
+        self.targetSizeLine = QLineEdit('768', self)
+        self.targetSizeLine.setValidator(QIntValidator(64, 1024, self))
+        self.targetSizeLine.setPlaceholderText('Target size (default: 512px)')
         self.rootBtn = QPushButton("Apply")
         self.resultLabel = QLabel("Num Files: 0")
         self.resultLabel.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
         self.resultLabel.setAlignment(Qt.AlignTop)
         
-        rootLayout.addWidget(self.rootLine)
-        rootLayout.addWidget(self.outfLine)
+        rootLayout.addWidget(self.imageDirLine)
+        rootLayout.addWidget(self.maskDirLine)
+        rootLayout.addWidget(self.outDirLine)
+        rootLayout.addWidget(self.targetSizeLine)
         rootLayout.addWidget(self.rootBtn)
         rootLayout.addWidget(self.resultLabel, 0)
 
@@ -75,11 +90,11 @@ class App(QMainWindow):
         control_layout = self.create_control_layout()
 
         ## Create widget
-        self.label =  QMainLabel()
-        self.label.load_pixmap('media/p1024.png')
+        self.label =  QMainLabel(self)
+        self.label.load_pixmap('media/512.png')
 
-        self.shortcut = QShortcut(QKeySequence("Ctrl+Z"), self)
-        self.shortcut.activated.connect(self.test_method)
+        self.sh = QShortcut(QKeySequence("Ctrl+Z"), self)
+        self.sh.activated.connect(self.label.restore_original)
         
         layout = QHBoxLayout()
         layout.addWidget(self.label)
@@ -95,11 +110,14 @@ class App(QMainWindow):
         self.rotate_label = rotate_label
         self.rotate_slider = rotate_slider
 
+        tools_layout = self.build_toolbox()
+
         layout = QHBoxLayout()
         btn_layout = QVBoxLayout()
 
         btn_layout.addLayout(rootLayout)
         btn_layout.addLayout(control_layout)
+        btn_layout.addLayout(tools_layout)
 
         btn_layout.addLayout(rotate_layout)
         btn_layout.addWidget(QPushButton("Left-Most"), 1)
@@ -135,7 +153,7 @@ class App(QMainWindow):
         self.rotate_label.setText(str(value))
         self.rotate_slider.setValue(value)
 
-        image = ImageQt.fromqpixmap(self.label.original_pixmap)
+        image = ImageQt.fromqpixmap(self.label.original_image_pixmap)
         image = image.rotate(-1 * value)
         pixmap = ImageQt.toqpixmap(image)
         self.label.setPixmap(pixmap)
@@ -143,7 +161,19 @@ class App(QMainWindow):
 
     def apply_root_dir(self):
 
-        self.root_dir = self.rootLine.text()
+        self.imageDirLine.setDisabled(True)
+        self.maskDirLine.setDisabled(True)
+        self.outDirLine.setDisabled(True)
+        self.targetSizeLine.setDisabled(True)
+
+        size = self.targetSizeLine.text()
+        if size == '':
+            size = self.targetSizeLine
+        else:
+            self.main_label_size = int(self.targetSizeLine.text())
+            self.label.set_size(self.main_label_size)
+        
+        self.root_dir = self.imageDirLine.text()
         if self.root_dir == '':
             self.resultLabel.setText(f'Please, set root folder!')
             return None
@@ -155,7 +185,10 @@ class App(QMainWindow):
             self.resultLabel.setText(f'Num of images is Zero!')
             return None
 
-        output_folder = self.outfLine.text()
+        self.mask_dir = self.maskDirLine.text()
+        masks = glob.glob(os.path.join(self.mask_dir, '*.*'))
+
+        output_folder = self.outDirLine.text()
 
         if len(output_folder) == 0:
             self.resultLabel.setText(f'Wrong output folder name')
@@ -171,6 +204,7 @@ class App(QMainWindow):
             os.mkdir(output_folder)
 
         self.images_list = sorted(images)
+        self.masks_list = sorted(masks)
         self.idx = 0
         self.read_pad_show(self.images_list[self.idx])
         self.cur_pos_label.setText(f'Position: {self.idx + 1}')
@@ -178,7 +212,7 @@ class App(QMainWindow):
 
     def read_pad_show(self, path):
         image = Image.open(path)
-        image = pad_to_square(image)
+        image = pad_to_square(image, self.main_label_size)
         image = ImageQt.toqpixmap(image)
         self.label.load_pixmap(image)
 
@@ -202,7 +236,7 @@ class App(QMainWindow):
 
     def direction_btn_press(self, forward=True):
 
-        folder = self.outfLine.text()
+        folder = self.outDirLine.text()
         fname = self.images_list[self.idx]
         fname = os.path.basename(fname)
         fname = fname.split('.')[0] + '.png'
@@ -223,20 +257,49 @@ class App(QMainWindow):
         self.read_pad_show(self.images_list[self.idx])
         self.cur_pos_label.setText(f'Position: {self.idx + 1}')
 
+# class ToolBox(QLayout):
+#     def __init__(self, parentQWidget = None):
+#         super(ToolBox, self).__init__(parentQWidget)
+
+    def build_toolbox(self):
+
+        layout = QHBoxLayout()
+
+        crop = QPushButton(QIcon('media/scissors.png'), 'Crop')
+        brush = QPushButton(QIcon('media/painting.png'), 'Draw')
+        eraser = QPushButton(QIcon('media/eraser.png'), 'Erase')
+        
+        layout.addWidget(crop)
+        layout.addWidget(brush)
+        layout.addWidget(eraser)
+
+        return layout
+
 
 class QMainLabel(QLabel):
-    def __init__(self, text='', parentQWidget = None):
-        super(QMainLabel, self).__init__(text, parentQWidget)
-        self.original_pixmap = None
+    def __init__(self, parentQWidget):
+        super(QMainLabel, self).__init__(parentQWidget)
+        self.original_image_pixmap = None
+        self.original_mask_pixmap = None
+        self.target_size = self.parent().main_label_size
+
+    def set_size(self, size):
+        self.target_size = size
     
-    def load_pixmap(self, path):
-        self.original_pixmap = QPixmap(path)
-        self.setPixmap(self.original_pixmap)
+    def load_pixmap(self, image_path, mask_path=None):
+        self.original_image_pixmap = QPixmap(image_path)
+        
+        if mask_path:
+            self.original_mask_pixmap = QPixmap(mask_path)
+        
+        self.setPixmap(self.original_image_pixmap)
+        
+
 
     def restore_original(self):
-        print('CTRL+Z')
-        if self.original_pixmap:
-            self.setPixmap(self.original_pixmap)
+        print('Ctrl+Z')
+        if self.original_image_pixmap:
+            self.setPixmap(self.original_image_pixmap)
 
     def mousePressEvent (self, eventQMouseEvent):
         self.originQPoint = eventQMouseEvent.pos()
@@ -255,7 +318,7 @@ class QMainLabel(QLabel):
         # cropQPixmap.save('output.png')
 
         crop_PIL = ImageQt.fromqpixmap(cropQPixmap)
-        crop_PIL = pad_to_square(crop_PIL, 1024)
+        crop_PIL = pad_to_square(crop_PIL, self.target_size)
         cropQPixmap = ImageQt.toqpixmap(crop_PIL)
         self.setPixmap(cropQPixmap)
         
@@ -279,5 +342,5 @@ def pad_to_square(image, size=1024):
 if __name__ == '__main__':
     app = QApplication(sys.argv)
     app.setWindowIcon(QIcon('media/vendetta.png'))
-    ex = App()
+    ex = MainWindow()
     sys.exit(app.exec_())
