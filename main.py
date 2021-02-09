@@ -13,6 +13,7 @@ from PyQt5.QtWidgets import QSizePolicy
 from PyQt5.QtGui import QIcon, QIntValidator, QPixmap, QKeySequence
 
 from PIL import ImageQt, Image
+import numpy as np
 
 
 class MainWindow(QMainWindow):
@@ -155,7 +156,15 @@ class MainWindow(QMainWindow):
 
         image = ImageQt.fromqpixmap(self.label.original_image_pixmap)
         image = image.rotate(-1 * value)
-        pixmap = ImageQt.toqpixmap(image)
+
+        mask = self.label.original_mask_pixmap
+        if mask:
+            mask = ImageQt.fromqpixmap(mask)
+            mask = mask.rotate(-1 * value)
+            pixmap = self.label.merge_image_mask(image, mask)
+        else:
+            pixmap = ImageQt.toqpixmap(image)
+        
         self.label.setPixmap(pixmap)
 
 
@@ -210,11 +219,21 @@ class MainWindow(QMainWindow):
         self.cur_pos_label.setText(f'Position: {self.idx + 1}')
 
 
-    def read_pad_show(self, path):
+    def read_pad_show(self, path, mask=None):
         image = Image.open(path)
-        image = pad_to_square(image, self.main_label_size)
+        image = pad_to_square(image, self.main_label_size)     
         image = ImageQt.toqpixmap(image)
-        self.label.load_pixmap(image)
+
+        mask_path = path.replace(f'{self.imageDirLine.text()}/', f'{self.maskDirLine.text()}/')
+        print(self.imageDirLine.text(), self.maskDirLine.text(), path, mask_path)
+        
+        if mask_path in self.masks_list:
+            print('mask OK')
+            mask = Image.open(mask_path)
+            mask = pad_to_square(mask, self.main_label_size)
+            mask = ImageQt.toqpixmap(mask)
+
+        self.label.load_pixmap(image, mask)
 
 
     def create_control_layout(self):
@@ -286,20 +305,55 @@ class QMainLabel(QLabel):
     def set_size(self, size):
         self.target_size = size
     
-    def load_pixmap(self, image_path, mask_path=None):
-        self.original_image_pixmap = QPixmap(image_path)
-        
-        if mask_path:
-            self.original_mask_pixmap = QPixmap(mask_path)
-        
+    def load_pixmap(self, image, mask=None):
+        self.original_image_pixmap = QPixmap(image)
+
+        if mask:
+            self.original_mask_pixmap = QPixmap(mask) 
+            combo = self.merge_image_mask(self.original_image_pixmap, self.original_mask_pixmap)
+            self.setPixmap(combo)
+            return
+    
         self.setPixmap(self.original_image_pixmap)
-        
+
+
+    def merge_image_mask(self, image, mask):
+
+        print(type(image), type(mask))
+
+        if type(image) == QPixmap and type(mask) == QPixmap:
+            pil_image = ImageQt.fromqpixmap(image)
+            pil_mask = ImageQt.fromqpixmap(mask)
+        else:
+            pil_image = image
+            pil_mask = mask
+
+        np_image = np.array(pil_image)
+        np_mask = np.array(pil_mask)
+
+        print(np_image.shape, np_mask.shape)
+
+        prob = np.float32(np_mask) / 255.0
+        np_combo = np.uint8( np_image * (1 - prob) + np_mask * prob * np.array([[[0., 1., 0.]]]) )
+
+        pil_combo = Image.fromarray(np_combo)
+        combo = ImageQt.toqpixmap(pil_combo)
+
+        return combo        
 
 
     def restore_original(self):
         print('Ctrl+Z')
-        if self.original_image_pixmap:
-            self.setPixmap(self.original_image_pixmap)
+
+        image = self.original_image_pixmap
+        mask = self.original_mask_pixmap
+
+        if image and mask:
+            image = self.merge_image_mask(image, mask)
+
+        self.setPixmap(image)
+
+        
 
     def mousePressEvent (self, eventQMouseEvent):
         self.originQPoint = eventQMouseEvent.pos()
